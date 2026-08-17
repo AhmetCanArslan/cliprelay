@@ -12,6 +12,7 @@ class ClipboardSettingsStore(context: Context) {
         const val KEY_AUTO_COPY_ENABLED = "auto_copy_enabled"
         const val KEY_AUTO_COPY_ONBOARDING_SHOWN = "auto_copy_onboarding_shown"
         const val KEY_OTP_RELAY_ENABLED = "otp_relay_enabled"
+        const val KEY_SHIZUKU_AUTO_COPY_ENABLED = "shizuku_auto_copy_enabled"
 
         const val AUTO_CLEAR_DELAY_MS = 60_000L
     }
@@ -51,6 +52,16 @@ class ClipboardSettingsStore(context: Context) {
 
     fun setOtpRelayEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_OTP_RELAY_ENABLED, enabled).apply()
+    }
+
+    /** When enabled, auto-copy reads the clipboard through Shizuku instead of
+     *  the accessibility service + ghost activity. */
+    fun isShizukuAutoCopyEnabled(): Boolean {
+        return prefs.getBoolean(KEY_SHIZUKU_AUTO_COPY_ENABLED, false)
+    }
+
+    fun setShizukuAutoCopyEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHIZUKU_AUTO_COPY_ENABLED, enabled).apply()
     }
 
     fun isAutoCopyOnboardingShown(): Boolean {

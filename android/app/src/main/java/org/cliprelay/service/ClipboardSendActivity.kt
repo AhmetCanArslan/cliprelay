@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.cliprelay.R
 import org.cliprelay.ui.Aqua
 import org.cliprelay.ui.Teal
 
@@ -93,9 +94,17 @@ class ClipboardSendActivity : ComponentActivity() {
         val text = clip.getItemAt(0).coerceToText(this)?.toString()
         if (text.isNullOrBlank()) return
 
-        val pushIntent = Intent(this, ClipRelayService::class.java).apply {
-            action = ClipRelayService.ACTION_PUSH_TEXT
-            putExtra(ClipRelayService.EXTRA_TEXT, text)
+        // Oversized clips can't ride in an intent extra (Binder transaction
+        // buffer) and wouldn't sync anyway — drop with a toast instead.
+        val pushIntent = ClipRelayService.pushTextIntentOrNull(this, text)
+        if (pushIntent == null) {
+            Log.w(TAG, "Clipboard text too large to sync (${text.length} chars) — dropped")
+            android.widget.Toast.makeText(
+                this,
+                getString(R.string.toast_text_too_large),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
         }
         startService(pushIntent)
         Log.d(TAG, "Forwarded clipboard text to service (${text.length} chars)")

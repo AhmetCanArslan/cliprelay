@@ -110,10 +110,14 @@ class ClipboardGhostActivity : ComponentActivity() {
             return false
         }
 
-        // Forward to service via the same path as the share sheet
-        val pushIntent = Intent(this, ClipRelayService::class.java).apply {
-            action = ClipRelayService.ACTION_PUSH_TEXT
-            putExtra(ClipRelayService.EXTRA_TEXT, text)
+        // Forward to service via the same path as the share sheet. Oversized
+        // clips are dropped here: they exceed the sync limit anyway, and putting
+        // them in an intent extra blows the Binder transaction buffer
+        // (TransactionTooLargeException crashes this activity).
+        val pushIntent = ClipRelayService.pushTextIntentOrNull(this, text)
+        if (pushIntent == null) {
+            Log.w(TAG, "Clipboard text too large to sync (${text.length} chars) — dropped")
+            return true
         }
         startService(pushIntent)
         Log.d(TAG, "Forwarded clipboard text to service (${text.length} chars)")

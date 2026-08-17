@@ -41,6 +41,7 @@ import org.cliprelay.protocol.SessionMode
 import org.cliprelay.protocol.VersionMismatchException
 import org.cliprelay.review.ReviewPromptStore
 import org.cliprelay.settings.ClipboardSettingsStore
+import org.cliprelay.shizuku.ShizukuManager
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.Executors
@@ -72,6 +73,8 @@ class ClipRelayService : Service(), L2capServerCallback {
         const val ACTION_VERSION_MISMATCH = "org.cliprelay.action.VERSION_MISMATCH"
         const val ACTION_GHOST_FINISHED = "org.cliprelay.action.GHOST_FINISHED"
         const val ACTION_ACCESSIBILITY_COPY_DETECTED = "org.cliprelay.action.ACCESSIBILITY_COPY_DETECTED"
+        /** Re-evaluates which auto-copy backend runs (sent when its settings change). */
+        const val ACTION_REFRESH_AUTO_COPY = "org.cliprelay.action.REFRESH_AUTO_COPY"
         const val ACTION_SEND_CONFIG_UPDATE = "org.cliprelay.action.SEND_CONFIG_UPDATE"
         const val ACTION_PUSH_IMAGE = "org.cliprelay.action.PUSH_IMAGE"
         const val EXTRA_IMAGE_PATH = "extra_image_path"
@@ -91,7 +94,9 @@ class ClipRelayService : Service(), L2capServerCallback {
         const val KEY_PENDING_PAIRING_NAME = "pending_pairing_name"
 
         private const val TAG = "ClipRelayService"
-        private const val MAX_CLIPBOARD_BYTES = 102_400
+        /** Largest clipboard text we sync. Also the ceiling for PUSH_TEXT intent
+         *  extras — see [pushTextIntentOrNull]. */
+        const val MAX_CLIPBOARD_BYTES = 102_400
         // One copy often fires several detections (click + "Copied" toast +
         // toolbar close); the first ghost read covers them all.
         private const val CLIPBOARD_DEBOUNCE_MS = 700L
@@ -109,6 +114,28 @@ class ClipRelayService : Service(), L2capServerCallback {
         // advertising events to catch a scan response when its Wi-Fi/BT radio is
         // in a power-save state that drops the occasional SCAN_RSP.
         private const val PAIRING_TIMEOUT_MS = 60_000L
+        // Shizuku backend polls the clipboard (no copy event exists to listen
+        // for). Fast right after a change, backing off while nothing happens.
+        private const val SHIZUKU_POLL_FAST_MS = 600L
+        private const val SHIZUKU_POLL_SLOW_MS = 3_000L
+
+        /**
+         * Builds a PUSH_TEXT intent, or returns null when the text is larger
+         * than [MAX_CLIPBOARD_BYTES].
+         *
+         * Intent extras travel through the Binder transaction buffer (~1 MB
+         * shared per process), so handing a multi-megabyte clip to
+         * startService() throws TransactionTooLargeException and crashes the
+         * caller. Such text is dropped anyway by pushPlainTextToMac, so the
+         * size check belongs before the intent is ever sent.
+         */
+        fun pushTextIntentOrNull(context: Context, text: String): Intent? {
+            if (text.toByteArray(Charsets.UTF_8).size > MAX_CLIPBOARD_BYTES) return null
+            return Intent(context, ClipRelayService::class.java).apply {
+                action = ACTION_PUSH_TEXT
+                putExtra(EXTRA_TEXT, text)
+            }
+        }
     }
 
     // BLE components
@@ -159,6 +186,12 @@ class ClipRelayService : Service(), L2capServerCallback {
     private var lastSentTextAtMs = 0L
     @Volatile
     private var suppressAutoCopyUntilMs = 0L
+
+    // Shizuku auto-copy backend (polling replaces accessibility + ghost activity)
+    @Volatile
+    private var shizukuPollThread: Thread? = null
+    @Volatile
+    private var shizukuLastText: String? = null
 
     // ── Session handles ───────────────────────────────────────────────
 
@@ -235,6 +268,7 @@ class ClipRelayService : Service(), L2capServerCallback {
         super.onCreate()
         clipboardWriter = ClipboardWriter(this)
         clipboardSettingsStore = ClipboardSettingsStore(this)
+        ShizukuManager.init(this)
         pairingStore = PairingStore(this)
 
         loadPairingState()
@@ -275,6 +309,7 @@ class ClipRelayService : Service(), L2capServerCallback {
     override fun onDestroy() {
         isDestroyed = true
         anyMacConnected = false
+        stopShizukuPolling()
         clipboardAutoClearHandler.removeCallbacksAndMessages(null)
         clearPairingTimeout()
         // The receiver is only registered when startForeground succeeded in onCreate.
@@ -331,6 +366,10 @@ class ClipRelayService : Service(), L2capServerCallback {
             }
             ACTION_ACCESSIBILITY_COPY_DETECTED -> {
                 handleClipboardChanged()
+                return START_STICKY
+            }
+            ACTION_REFRESH_AUTO_COPY -> {
+                updateShizukuPolling()
                 return START_STICKY
             }
             ACTION_SEND_CONFIG_UPDATE -> {
@@ -980,6 +1019,18 @@ class ClipRelayService : Service(), L2capServerCallback {
         }
         lastClipboardLaunchMs = now
 
+        // With the Shizuku backend the clipboard can be read from the
+        // background — no ghost activity, no focus theft.
+        if (isShizukuAutoCopyActive()) {
+            executor.execute {
+                ShizukuManager.readClipboardText()?.let { text ->
+                    shizukuLastText = text
+                    pushPlainTextToMac(text)
+                }
+            }
+            return
+        }
+
         // Skip if ghost activity is already in flight
         if (ghostActivityInFlight) {
             Log.d(TAG, "Skipping clipboard: ghost activity in flight")
@@ -1009,6 +1060,64 @@ class ClipRelayService : Service(), L2capServerCallback {
             Log.e(TAG, "Could not launch ghost activity", it)
             clearGhostActivityInFlight()
         }
+    }
+
+    // ── Auto-copy (Shizuku backend) ──────────────────────────────────
+
+    /** True when copies should be picked up through Shizuku rather than accessibility. */
+    private fun isShizukuAutoCopyActive(): Boolean =
+        clipboardSettingsStore.isAutoCopyEnabled() &&
+            clipboardSettingsStore.isShizukuAutoCopyEnabled() &&
+            ShizukuManager.isReady
+
+    /** Starts or stops the poll loop to match the current settings/connection. */
+    private fun updateShizukuPolling() {
+        if (!isDestroyed && anyMacConnected && isShizukuAutoCopyActive()) {
+            startShizukuPolling()
+        } else {
+            stopShizukuPolling()
+        }
+    }
+
+    private fun startShizukuPolling() {
+        if (shizukuPollThread?.isAlive == true) return
+        Log.i(TAG, "Starting Shizuku clipboard polling")
+        val thread = Thread({
+            var delayMs = SHIZUKU_POLL_FAST_MS
+            // The first read only seeds the baseline: whatever was already on
+            // the clipboard when we connected is not a fresh copy.
+            var seeded = false
+            try {
+                while (!isDestroyed && anyMacConnected && isShizukuAutoCopyActive()) {
+                    val text = ShizukuManager.readClipboardText()
+                    if (text != null && text != shizukuLastText) {
+                        shizukuLastText = text
+                        delayMs = SHIZUKU_POLL_FAST_MS
+                        // Don't echo back text the Mac just wrote here.
+                        if (seeded && SystemClock.elapsedRealtime() >= suppressAutoCopyUntilMs) {
+                            pushPlainTextToMac(text)
+                        }
+                    } else {
+                        delayMs = (delayMs * 2).coerceAtMost(SHIZUKU_POLL_SLOW_MS)
+                    }
+                    seeded = true
+                    Thread.sleep(delayMs)
+                }
+            } catch (_: InterruptedException) {
+                // Normal stop path.
+            } catch (e: Exception) {
+                Log.w(TAG, "Shizuku clipboard polling stopped: ${e.message}")
+            }
+        }, "shizuku-clipboard-poll")
+        thread.isDaemon = true
+        shizukuPollThread = thread
+        thread.start()
+    }
+
+    private fun stopShizukuPolling() {
+        val thread = shizukuPollThread ?: return
+        shizukuPollThread = null
+        thread.interrupt()
     }
 
     fun clearGhostActivityInFlight() {
@@ -1087,6 +1196,7 @@ class ClipRelayService : Service(), L2capServerCallback {
         val justConnected = connected && !anyMacConnected
         anyMacConnected = connected
         if (justConnected) SmsOtpController.armIfEligible(this)
+        updateShizukuPolling()
     }
 
     /** Share-sheet target label: single Mac shows its name, several show a collective label. */

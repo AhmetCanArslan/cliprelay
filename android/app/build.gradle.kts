@@ -119,6 +119,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // Shizuku's privileged helper is reached over AIDL (IUserService).
+        aidl = true
     }
 
 }
@@ -196,6 +198,11 @@ dependencies {
     // Play in-app review (rating dialog without leaving the app).
     implementation("com.google.android.play:review:2.0.2")
     implementation("androidx.activity:activity-ktx:1.9.3")
+    // Shizuku: optional privileged backend for auto-copy. Lets a user who runs
+    // Shizuku read the clipboard from the background instead of granting the
+    // accessibility service.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 

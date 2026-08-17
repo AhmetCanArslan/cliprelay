@@ -94,6 +94,9 @@ fun ClipRelayScreen(
     hideClipboardEnabled: Boolean = true,
     autoCopyEnabled: Boolean,
     autoCopyAccessibilityEnabled: Boolean = false,
+    shizukuBackendEnabled: Boolean = false,
+    shizukuInstalled: Boolean = false,
+    shizukuReady: Boolean = false,
     imageSyncEnabled: Boolean = false,
     otpRelayEnabled: Boolean = false,
     pairingFailed: Boolean = false,
@@ -105,6 +108,7 @@ fun ClipRelayScreen(
     onAutoClearSettingChanged: (Boolean) -> Unit,
     onHideClipboardSettingChanged: (Boolean) -> Unit = {},
     onAutoCopySettingChanged: (Boolean) -> Unit,
+    onShizukuBackendChanged: (Boolean) -> Unit = {},
     onImageSyncSettingChanged: (Boolean) -> Unit = {},
     onAutoCopyFixClick: () -> Unit = {},
     onOtpRelaySettingChanged: (Boolean) -> Unit = {},
@@ -203,6 +207,9 @@ fun ClipRelayScreen(
                     hideClipboardEnabled = hideClipboardEnabled,
                     autoCopyEnabled = autoCopyEnabled,
                     autoCopyAccessibilityEnabled = autoCopyAccessibilityEnabled,
+                    shizukuBackendEnabled = shizukuBackendEnabled,
+                    shizukuInstalled = shizukuInstalled,
+                    shizukuReady = shizukuReady,
                     imageSyncEnabled = imageSyncEnabled,
                     otpRelayEnabled = otpRelayEnabled,
                     pairingFailed = pairingFailed,
@@ -213,6 +220,7 @@ fun ClipRelayScreen(
                     onAutoClearSettingChanged = onAutoClearSettingChanged,
                     onHideClipboardSettingChanged = onHideClipboardSettingChanged,
                     onAutoCopySettingChanged = onAutoCopySettingChanged,
+                    onShizukuBackendChanged = onShizukuBackendChanged,
                     onImageSyncSettingChanged = onImageSyncSettingChanged,
                     onAutoCopyFixClick = onAutoCopyFixClick,
                     onOtpRelaySettingChanged = onOtpRelaySettingChanged,
@@ -372,6 +380,9 @@ private fun MainCard(
     hideClipboardEnabled: Boolean = true,
     autoCopyEnabled: Boolean,
     autoCopyAccessibilityEnabled: Boolean = false,
+    shizukuBackendEnabled: Boolean = false,
+    shizukuInstalled: Boolean = false,
+    shizukuReady: Boolean = false,
     imageSyncEnabled: Boolean = false,
     otpRelayEnabled: Boolean = false,
     pairingFailed: Boolean = false,
@@ -382,6 +393,7 @@ private fun MainCard(
     onAutoClearSettingChanged: (Boolean) -> Unit,
     onHideClipboardSettingChanged: (Boolean) -> Unit = {},
     onAutoCopySettingChanged: (Boolean) -> Unit,
+    onShizukuBackendChanged: (Boolean) -> Unit = {},
     onImageSyncSettingChanged: (Boolean) -> Unit = {},
     onAutoCopyFixClick: () -> Unit = {},
     onOtpRelaySettingChanged: (Boolean) -> Unit = {},
@@ -650,9 +662,23 @@ private fun MainCard(
             AutoCopySettingRow(
                 enabled = autoCopyEnabled,
                 accessibilityEnabled = autoCopyAccessibilityEnabled,
+                // With Shizuku driving auto-copy, the accessibility service is
+                // not needed — don't nag for it.
+                shizukuActive = shizukuBackendEnabled && shizukuReady,
                 onEnabledChange = onAutoCopySettingChanged,
                 onFixClick = onAutoCopyFixClick
             )
+            // Only offered when Shizuku is actually on the device. Shown even
+            // with auto-copy off, so the backend can be chosen first and the
+            // accessibility prompt skipped entirely.
+            if (shizukuInstalled) {
+                Spacer(modifier = Modifier.height(8.dp))
+                ShizukuSettingRow(
+                    enabled = shizukuBackendEnabled,
+                    ready = shizukuReady,
+                    onEnabledChange = onShizukuBackendChanged
+                )
+            }
             footer()
         }
     }
@@ -899,6 +925,77 @@ private fun AutoClearSettingRow(
 }
 
 @Composable
+private fun ShizukuSettingRow(
+    enabled: Boolean,
+    ready: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    // Enabled but not granted yet: the toggle stays on and the row explains
+    // what's missing, since granting happens in the Shizuku app.
+    val needsPermission = enabled && !ready
+    val warningColor = Color(0xFFE5A13A)
+
+    val toggleBg = if (enabled) Color(0x1400FFD5) else Color(0x08000000)
+    val toggleBorder = when {
+        needsPermission -> warningColor.copy(alpha = 0.5f)
+        enabled -> Color(0x2B00FFD5)
+        else -> Color(0x14000000)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(toggleBg)
+            .border(1.dp, toggleBorder, RoundedCornerShape(18.dp))
+            .toggleable(
+                value = enabled,
+                role = Role.Switch,
+                onValueChange = onEnabledChange
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.shizuku_setting_title),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xCC000000)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = when {
+                    needsPermission -> stringResource(R.string.shizuku_setting_subtitle_needs_permission)
+                    enabled -> stringResource(R.string.shizuku_setting_subtitle_on)
+                    else -> stringResource(R.string.shizuku_setting_subtitle_off)
+                },
+                fontSize = 12.sp,
+                fontWeight = if (needsPermission) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (needsPermission) warningColor else Color(0x80000000),
+                lineHeight = 16.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Teal,
+                checkedTrackColor = Aqua.copy(alpha = 0.45f),
+                checkedBorderColor = Aqua.copy(alpha = 0.60f),
+                uncheckedThumbColor = Color(0xFF7A7A7A),
+                uncheckedTrackColor = Color(0x15000000),
+                uncheckedBorderColor = Color(0x40000000)
+            )
+        )
+    }
+}
+
+@Composable
 private fun HideClipboardSettingRow(
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit
@@ -958,10 +1055,11 @@ private fun HideClipboardSettingRow(
 private fun AutoCopySettingRow(
     enabled: Boolean,
     accessibilityEnabled: Boolean = false,
+    shizukuActive: Boolean = false,
     onEnabledChange: (Boolean) -> Unit,
     onFixClick: () -> Unit = {}
 ) {
-    val isBroken = enabled && !accessibilityEnabled
+    val isBroken = enabled && !accessibilityEnabled && !shizukuActive
     val warningColor = Color(0xFFE57373)
 
     val toggleBg = if (enabled) Color(0x1400FFD5) else Color(0x08000000)

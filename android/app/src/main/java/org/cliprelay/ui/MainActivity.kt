@@ -39,6 +39,7 @@ import org.cliprelay.permissions.BlePermissions
 import org.cliprelay.review.ReviewPromptStore
 import org.cliprelay.service.ClipboardAccessibilityService
 import org.cliprelay.service.ClipRelayService
+import org.cliprelay.shizuku.ShizukuManager
 import org.cliprelay.otp.SmsOtpController
 import org.cliprelay.settings.ClipboardSettingsStore
 import kotlinx.coroutines.Dispatchers
@@ -203,6 +204,9 @@ class MainActivity : AppCompatActivity() {
             val autoCopyAccessibilityEnabled by viewModel.autoCopyAccessibilityEnabled.collectAsState()
             val imageSyncEnabled by viewModel.imageSyncEnabled.collectAsState()
             val otpRelayEnabled by viewModel.otpRelayEnabled.collectAsState()
+            val shizukuBackendEnabled by viewModel.shizukuBackendEnabled.collectAsState()
+            val shizukuInstalled by viewModel.shizukuInstalled.collectAsState()
+            val shizukuReady by viewModel.shizukuReady.collectAsState()
             val showVersionMismatch by viewModel.showVersionMismatch.collectAsState()
             val pairingFailed by viewModel.pairingFailed.collectAsState()
             var showAccessibilityDisclosure by remember { mutableStateOf(false) }
@@ -257,6 +261,9 @@ class MainActivity : AppCompatActivity() {
                 hideClipboardEnabled = hideClipboardEnabled,
                 autoCopyEnabled = autoCopyEnabled,
                 autoCopyAccessibilityEnabled = autoCopyAccessibilityEnabled,
+                shizukuBackendEnabled = shizukuBackendEnabled,
+                shizukuInstalled = shizukuInstalled,
+                shizukuReady = shizukuReady,
                 imageSyncEnabled = imageSyncEnabled,
                 otpRelayEnabled = otpRelayEnabled,
                 pairingFailed = pairingFailed,
@@ -305,7 +312,10 @@ class MainActivity : AppCompatActivity() {
                     clipboardSettingsStore.setHideSyncedClipboardEnabled(enabled)
                 },
                 onAutoCopySettingChanged = { enabled ->
-                    if (enabled && !isAccessibilityServiceEnabled()) {
+                    // The Shizuku backend reads the clipboard on its own, so
+                    // don't demand accessibility when it is live.
+                    val shizukuCovers = shizukuBackendEnabled && shizukuReady
+                    if (enabled && !isAccessibilityServiceEnabled() && !shizukuCovers) {
                         showAccessibilityDisclosure = true
                     } else {
                         viewModel.onAutoCopySettingChanged(enabled)
@@ -318,6 +328,19 @@ class MainActivity : AppCompatActivity() {
                     val configIntent = Intent(this, ClipRelayService::class.java)
                     configIntent.action = ClipRelayService.ACTION_SEND_CONFIG_UPDATE
                     startServiceSafely(configIntent)
+                },
+                onShizukuBackendChanged = { enabled ->
+                    viewModel.onShizukuBackendChanged(enabled)
+                    clipboardSettingsStore.setShizukuAutoCopyEnabled(enabled)
+                    // Granting happens in the Shizuku app; onResume re-reads the
+                    // result and the service picks up the backend switch.
+                    if (enabled && !ShizukuManager.hasPermission()) {
+                        ShizukuManager.requestPermission()
+                    }
+                    refreshShizukuState()
+                    val refreshIntent = Intent(this, ClipRelayService::class.java)
+                    refreshIntent.action = ClipRelayService.ACTION_REFRESH_AUTO_COPY
+                    startServiceSafely(refreshIntent)
                 },
                 onAutoCopyFixClick = {
                     showAccessibilityDisclosure = true
@@ -380,6 +403,18 @@ class MainActivity : AppCompatActivity() {
         handlePairingDeepLink(intent)
     }
 
+    /** Re-reads Shizuku availability and tells the service which backend to run. */
+    private fun refreshShizukuState() {
+        ShizukuManager.init(this)
+        val installed = ShizukuManager.managerPackage(this) != null
+        val ready = ShizukuManager.isReady
+        viewModel.onShizukuStateChanged(installed = installed, ready = ready)
+        viewModel.onShizukuBackendChanged(clipboardSettingsStore.isShizukuAutoCopyEnabled())
+        val refreshIntent = Intent(this, ClipRelayService::class.java)
+        refreshIntent.action = ClipRelayService.ACTION_REFRESH_AUTO_COPY
+        startServiceSafely(refreshIntent)
+    }
+
     override fun onResume() {
         super.onResume()
         // If the user backed out mid-install (e.g. switched apps during Play's
@@ -399,6 +434,7 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
         viewModel.onAccessibilityStateChanged(isAccessibilityServiceEnabled())
+        refreshShizukuState()
         // Keep the SMS consent window open while foreground, but only if a Mac is connected.
         SmsOtpController.armIfEligible(this)
         viewModel.onImageSyncSettingChanged(PairingStore(this).isRichMediaEnabled())

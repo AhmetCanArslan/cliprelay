@@ -5,15 +5,19 @@ package org.cliprelay.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.content.ContextCompat
 import org.cliprelay.pairing.PairingStore
 import org.cliprelay.service.ClipRelayService
+import org.cliprelay.shizuku.ShizukuManager
 
 class DebugSmokeReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_IMPORT_PAIRING = "org.cliprelay.debug.IMPORT_PAIRING"
         const val ACTION_CLEAR_PAIRING = "org.cliprelay.debug.CLEAR_PAIRING"
         const val ACTION_RESET_PROBE = "org.cliprelay.debug.RESET_PROBE"
+        /** Verifies the Shizuku clipboard backend on a real device (debug builds only). */
+        const val ACTION_SHIZUKU_PROBE = "org.cliprelay.debug.SHIZUKU_PROBE"
         private const val EXTRA_TOKEN = "token"
         private const val EXTRA_DEVICE_NAME = "device_name"
     }
@@ -67,6 +71,26 @@ class DebugSmokeReceiver : BroadcastReceiver() {
                 }
 
                 setResultCode(1)
+            }
+
+            ACTION_SHIZUKU_PROBE -> {
+                val pending = goAsync()
+                // Binding and reading block, so get off the main thread.
+                Thread {
+                    try {
+                        ShizukuManager.init(context)
+                        val state = ShizukuManager.state()
+                        val readable = ShizukuManager.verifyClipboardAccess()
+                        val text = ShizukuManager.readClipboardText()
+                        Log.w(
+                            "ShizukuProbe",
+                            "state=$state readable=$readable text=${text?.take(80)}"
+                        )
+                        pending.resultCode = if (readable) 1 else 3
+                    } finally {
+                        pending.finish()
+                    }
+                }.start()
             }
 
             ACTION_RESET_PROBE -> {

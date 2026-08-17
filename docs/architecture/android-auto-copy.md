@@ -34,6 +34,20 @@ Use an `AccessibilityService` to detect copy actions by monitoring click events 
 - May not detect all copy actions (custom copy buttons without ACTION_COPY or standard label)
 - Play Store scrutiny for accessibility service usage
 
+### 3b. Shizuku (Chosen as an Optional Backend)
+
+Bind a privileged helper process through [Shizuku](https://shizuku.rikka.app/) and read the clipboard from it. A shell-uid (or root) caller is exempt from the focus rule, so `getPrimaryClip()` works from the background.
+
+**How it works:** `UserService` (AIDL, `IUserService`) runs inside the Shizuku-spawned process and talks to the hidden `android.content.IClipboard` interface via reflection, passing `com.android.shell` as the calling package. `ClipRelayService` polls it (600 ms after a change, backing off to 3 s while idle) whenever a Mac is connected.
+
+Text only: the clipboard service grants a clip's URI permission to the uid that read the clip, which here is the privileged helper rather than the app, so image clips can't be read this way.
+
+**Tradeoffs:**
+- No accessibility permission, no ghost activity, no focus theft, no "pasted from your clipboard" toast
+- Catches every copy, including custom copy buttons that emit no accessibility events
+- Requires the user to install Shizuku and start its service (ADB/wireless debugging, or root)
+- Reads are polled, so a copy can take up to ~3 s to sync when the clipboard has been quiet
+
 ### 4. Polling via Ghost Activity (Explored, Rejected)
 
 Periodically launch the ghost activity to read the clipboard and check for changes.
@@ -64,6 +78,20 @@ User taps "Copy" in any app
     → Service encrypts and sends via BLE → Mac
 ```
 
+### Auto-Copy Flow (Shizuku backend)
+
+```
+User taps "Copy" in any app
+    → ClipRelayService's poll thread reads the clip via Shizuku's UserService
+      (or reads immediately if the accessibility service also flagged a copy)
+    → Text differs from the last seen clip → ACTION_PUSH_TEXT path
+    → Service encrypts and sends via BLE → Mac
+```
+
+The backend is chosen by the "Use Shizuku for auto-copy" toggle, which only
+appears when the Shizuku app is installed. While it is active the accessibility
+service is not required, and the UI stops warning about it.
+
 ### Quick Settings Tile
 
 `ClipboardTileService` — a "Send to Mac" tile in the notification shade. Uses `STATE_INACTIVE` (action button, not toggle). Launches `ClipboardSendActivity` — a visible variant of the ghost activity that shows a brief "Sending clipboard to [Mac name]" overlay animation.
@@ -82,6 +110,7 @@ When the Mac sends clipboard to Android, the clipboard write triggers the listen
 |------------|---------|
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Protect foreground service from OEM killing |
 | `BIND_ACCESSIBILITY_SERVICE` | Auto-copy detection (optional, user-enabled) |
+| `moe.shizuku.manager.permission.API_V23` | Privileged clipboard reads via Shizuku (optional) |
 
 No `SYSTEM_ALERT_WINDOW` needed — the ghost activity is a regular activity.
 
@@ -91,3 +120,5 @@ No `SYSTEM_ALERT_WINDOW` needed — the ghost activity is a regular activity.
 - Android 12+ shows "pasted from clipboard" system toast on every ghost activity clipboard read
 - Accessibility-based copy detection may miss custom copy buttons
 - Accessibility service must be re-enabled after app reinstall
+- Clipboard text above 100 KB is not synced; it is dropped before the intent is
+  built, because intent extras travel through the ~1 MB Binder transaction buffer

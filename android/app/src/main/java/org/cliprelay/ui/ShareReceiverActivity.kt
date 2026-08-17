@@ -31,9 +31,12 @@ class ShareReceiverActivity : AppCompatActivity() {
     private fun handleTextShare() {
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (!text.isNullOrBlank()) {
-            val serviceIntent = Intent(this, ClipRelayService::class.java).apply {
-                action = ClipRelayService.ACTION_PUSH_TEXT
-                putExtra(ClipRelayService.EXTRA_TEXT, text)
+            // Oversized text can't ride in an intent extra (Binder transaction
+            // buffer) and exceeds the sync limit anyway.
+            val serviceIntent = ClipRelayService.pushTextIntentOrNull(this, text)
+            if (serviceIntent == null) {
+                Toast.makeText(this, getString(R.string.toast_text_too_large), Toast.LENGTH_SHORT).show()
+                return
             }
             runCatching {
                 ContextCompat.startForegroundService(this, serviceIntent)

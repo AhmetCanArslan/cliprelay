@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Shizuku: optional privileged backend for auto-copy. -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -142,6 +145,16 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Required by the Shizuku API so the Shizuku manager can hand this
+             app a binder. Exported by design; guarded by Shizuku's own
+             permission model. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
 </manifest>

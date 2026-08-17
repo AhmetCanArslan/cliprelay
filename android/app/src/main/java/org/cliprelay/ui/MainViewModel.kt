@@ -55,6 +55,18 @@ class MainViewModel : ViewModel() {
     private val _autoCopyAccessibilityEnabled = MutableStateFlow(false)
     val autoCopyAccessibilityEnabled: StateFlow<Boolean> = _autoCopyAccessibilityEnabled.asStateFlow()
 
+    /** User picked Shizuku as the auto-copy backend. */
+    private val _shizukuBackendEnabled = MutableStateFlow(false)
+    val shizukuBackendEnabled: StateFlow<Boolean> = _shizukuBackendEnabled.asStateFlow()
+
+    /** Shizuku app is installed (whether or not its service runs). */
+    private val _shizukuInstalled = MutableStateFlow(false)
+    val shizukuInstalled: StateFlow<Boolean> = _shizukuInstalled.asStateFlow()
+
+    /** Shizuku is running and has granted ClipRelay access. */
+    private val _shizukuReady = MutableStateFlow(false)
+    val shizukuReady: StateFlow<Boolean> = _shizukuReady.asStateFlow()
+
     private val _otpRelayEnabled = MutableStateFlow(false)
     val otpRelayEnabled: StateFlow<Boolean> = _otpRelayEnabled.asStateFlow()
 
@@ -167,6 +179,15 @@ class MainViewModel : ViewModel() {
 
     fun onAccessibilityStateChanged(enabled: Boolean) {
         _autoCopyAccessibilityEnabled.value = enabled
+    }
+
+    fun onShizukuBackendChanged(enabled: Boolean) {
+        _shizukuBackendEnabled.value = enabled
+    }
+
+    fun onShizukuStateChanged(installed: Boolean, ready: Boolean) {
+        _shizukuInstalled.value = installed
+        _shizukuReady.value = ready
     }
 
     fun onOtpRelaySettingChanged(enabled: Boolean) {
