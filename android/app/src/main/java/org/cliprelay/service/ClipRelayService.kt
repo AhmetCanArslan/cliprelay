@@ -73,9 +73,6 @@ class ClipRelayService : Service(), L2capServerCallback {
         const val ACTION_GHOST_FINISHED = "org.cliprelay.action.GHOST_FINISHED"
         const val ACTION_ACCESSIBILITY_COPY_DETECTED = "org.cliprelay.action.ACCESSIBILITY_COPY_DETECTED"
         const val ACTION_SEND_CONFIG_UPDATE = "org.cliprelay.action.SEND_CONFIG_UPDATE"
-        const val ACTION_PUSH_IMAGE = "org.cliprelay.action.PUSH_IMAGE"
-        const val EXTRA_IMAGE_PATH = "extra_image_path"
-        const val EXTRA_MIME_TYPE = "extra_mime_type"
         const val ACTION_RICH_MEDIA_SETTING_CHANGED = "org.cliprelay.action.RICH_MEDIA_SETTING_CHANGED"
         const val EXTRA_RICH_MEDIA_ENABLED = "extra_rich_media_enabled"
 
@@ -191,7 +188,6 @@ class ClipRelayService : Service(), L2capServerCallback {
             handleRichMediaSettingChanged(enabled)
         override fun onImageReceived(data: ByteArray, contentType: String, hash: String) =
             handleImageReceived(data, contentType, hash)
-        override fun onImageSendFailed(reason: String) = handleImageSendFailed(reason)
         override fun isDeviceAwake(): Boolean = isDeviceAwakeNow()
     }
 
@@ -336,15 +332,6 @@ class ClipRelayService : Service(), L2capServerCallback {
             ACTION_SEND_CONFIG_UPDATE -> {
                 readySessions().forEach { it.session?.sendConfigUpdate() }
                 return START_STICKY
-            }
-            ACTION_PUSH_IMAGE -> {
-                val imagePath = intent.getStringExtra(EXTRA_IMAGE_PATH)
-                val mimeType = intent.getStringExtra(EXTRA_MIME_TYPE) ?: "image/png"
-                if (imagePath != null) {
-                    executor.execute {
-                        pushImageToMac(imagePath, mimeType)
-                    }
-                }
             }
             ACTION_PUSH_TEXT -> {
                 clearGhostActivityInFlight()
@@ -690,17 +677,6 @@ class ClipRelayService : Service(), L2capServerCallback {
         sendBroadcast(intent)
     }
 
-    private fun handleImageSendFailed(reason: String) {
-        Log.w(TAG, "Image send failed: $reason")
-        Handler(Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(
-                this,
-                "Could not transfer image. Make sure both devices are on the same Wi-Fi network.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
     private fun handleImageReceived(data: ByteArray, contentType: String, hash: String) {
         lastReceivedImageHash = hash
         Log.w(TAG, "Received image from Mac (${data.size} bytes, $contentType)")
@@ -746,46 +722,6 @@ class ClipRelayService : Service(), L2capServerCallback {
         lastSentTextHash = textHash
         lastSentTextAtMs = now
         DebugSmokeProbe.onOutboundClipboardPublished(this, text)
-    }
-
-    private fun pushImageToMac(imagePath: String, mimeType: String) {
-        if (isDestroyed) return
-        val file = java.io.File(imagePath)
-        if (!file.exists()) {
-            Log.e(TAG, "Image file not found: $imagePath")
-            return
-        }
-        val imageData = file.readBytes()
-        file.delete() // clean up cache file after reading
-
-        val maxSize = 10_485_760 // 10 MB
-        if (imageData.isEmpty() || imageData.size > maxSize) {
-            Log.w(TAG, "Image too large or empty: ${imageData.size} bytes")
-            Handler(Looper.getMainLooper()).post {
-                android.widget.Toast.makeText(this, "Image too large to send (max 10 MB)", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-
-        val targets = readySessions()
-        if (targets.isEmpty()) {
-            Log.w(TAG, "No active session; cannot send image")
-            Handler(Looper.getMainLooper()).post {
-                android.widget.Toast.makeText(this, "Not connected to Mac", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-
-        if (!pairingStore.isRichMediaEnabled()) {
-            Log.w(TAG, "Rich media not enabled; cannot send image")
-            Handler(Looper.getMainLooper()).post {
-                android.widget.Toast.makeText(this, "Image sync is not enabled", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-
-        targets.forEach { it.session?.sendImage(imageData, mimeType) }
-        Log.w(TAG, "Queued image for send to ${targets.size} Mac(s) (${imageData.size} bytes, $mimeType)")
     }
 
     // ── Pairing ────────────────────────────────────────────────────────

@@ -3,9 +3,7 @@ package org.cliprelay.protocol
 // Manages a single L2CAP protocol session: handshake, clipboard offer/accept, and payload transfer.
 
 import org.cliprelay.crypto.E2ECrypto
-import org.cliprelay.tcp.NetworkUtil
 import org.cliprelay.tcp.TcpImageReceiver
-import org.cliprelay.tcp.TcpImageSender
 import org.cliprelay.tcp.TcpTransferException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -101,9 +99,6 @@ class Session(
 
     /** Queue of outbound clipboard transfers (plaintext). */
     private val outboundQueue = LinkedBlockingQueue<ByteArray>()
-
-    /** Queue of outbound image transfers: (imageData, contentType). */
-    private val imageQueue = LinkedBlockingQueue<Pair<ByteArray, String>>()
 
     /** Queue of outbound CONFIG_UPDATE messages. */
     private val configUpdateQueue = LinkedBlockingQueue<Message>()
@@ -283,13 +278,6 @@ class Session(
                     continue
                 }
 
-                // Check for queued image transfers
-                val imageItem = imageQueue.poll()
-                if (imageItem != null) {
-                    doSendImage(imageItem.first, imageItem.second)
-                    continue
-                }
-
                 // Check for queued outbound transfers (short poll)
                 val outbound = outboundQueue.poll(50, TimeUnit.MILLISECONDS)
                 if (outbound != null) {
@@ -398,115 +386,6 @@ class Session(
                 callback.onTransferComplete(hash)
             }
             else -> throw ProtocolException("Expected ACCEPT or DONE, got ${response.type}")
-        }
-    }
-
-    // ── Outbound image transfer ─────────────────────────────────────
-
-    /**
-     * Queue an image for sending. Thread-safe.
-     * The actual transfer happens in the listen loop via TCP.
-     */
-    fun sendImage(imageData: ByteArray, contentType: String) {
-        if (closed.get()) return
-        imageQueue.put(Pair(imageData, contentType))
-    }
-
-    private fun doSendImage(imageData: ByteArray, contentType: String) {
-        val key = sessionKey ?: throw ProtocolException("No session key available")
-        val hash = sha256Hex(imageData)
-        val senderIp = NetworkUtil.getLocalIpAddress()
-            ?: throw ProtocolException("No local IP address available")
-
-        // Send OFFER over BLE
-        val offerJson = JSONObject().apply {
-            put("hash", hash)
-            put("size", imageData.size)
-            put("type", contentType)
-            put("senderIp", senderIp)
-            put("supportsNonce", true)
-        }
-        val offer = Message(MessageType.OFFER, offerJson.toString().toByteArray())
-        MessageCodec.write(output, offer)
-
-        // Read response: ACCEPT, REJECT, or ERROR
-        val response = readWithConfigUpdates(transferTimeoutMs)
-        when (response.type) {
-            MessageType.ACCEPT -> {
-                val acceptJson = JSONObject(String(response.payload))
-                val tcpHost = acceptJson.getString("tcpHost")
-                val tcpPort = acceptJson.getInt("tcpPort")
-                // Parse optional tcpNonce (new receivers include this)
-                // TODO(2026-05-01): Remove IP validation fallback — all clients should support tcpNonce by now
-                val tcpNonce = acceptJson.optString("tcpNonce").takeIf { it.isNotEmpty() }?.let { hex ->
-                    ByteArray(hex.length / 2) { i ->
-                        hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
-                    }
-                }
-
-                // Encrypt image
-                val encrypted = E2ECrypto.seal(imageData, key)
-
-                // Push via TCP with retry (2 attempts, 500ms pause)
-                var lastError: Exception? = null
-                for (attempt in 1..2) {
-                    try {
-                        TcpImageSender.send(
-                            tcpHost,
-                            tcpPort,
-                            encrypted,
-                            nonce = tcpNonce,
-                            sourceIp = NetworkUtil.getLocalIpAddress(),
-                        )
-                        lastError = null
-                        break
-                    } catch (e: Exception) {
-                        lastError = e
-                        if (attempt < 2) Thread.sleep(500)
-                    }
-                }
-
-                if (lastError != null) {
-                    // Send ERROR over BLE
-                    val errorJson = JSONObject().apply {
-                        put("code", "connection_failed")
-                    }
-                    MessageCodec.write(output, Message(MessageType.ERROR, errorJson.toString().toByteArray()))
-                    callback.onImageSendFailed(lastError.message ?: "TCP connection failed")
-                    return
-                }
-
-                // Wait for DONE or ERROR
-                val done = readWithConfigUpdates(transferTimeoutMs)
-                when (done.type) {
-                    MessageType.DONE -> {
-                        callback.onTransferComplete(hash)
-                    }
-                    MessageType.ERROR -> {
-                        val code = JSONObject(String(done.payload)).optString("code", "unknown")
-                        Log.w(tag, "Receiver reported error after image transfer: $code")
-                        callback.onImageSendFailed("Receiver error: $code")
-                        return
-                    }
-                    else -> {
-                        Log.w(tag, "Expected DONE or ERROR after image send, got ${done.type}")
-                        callback.onImageSendFailed("Unexpected response: ${done.type}")
-                        return
-                    }
-                }
-            }
-            MessageType.REJECT -> {
-                val rejectJson = JSONObject(String(response.payload))
-                val reason = rejectJson.optString("reason", "unknown")
-                Log.i(tag, "Image rejected: $reason")
-                callback.onImageRejected(reason)
-            }
-            MessageType.ERROR -> {
-                val errorJson = JSONObject(String(response.payload))
-                val code = errorJson.optString("code", "unknown")
-                Log.w(tag, "Image error from receiver: $code")
-            }
-            else -> throw ProtocolException("Expected ACCEPT, REJECT, or ERROR, got ${response.type}")
         }
     }
 
@@ -902,7 +781,5 @@ interface SessionCallback {
     fun onPairingComplete(sharedSecret: ByteArray, remoteName: String?) {}
     fun onRichMediaSettingChanged(enabled: Boolean) {}
     fun onImageReceived(data: ByteArray, contentType: String, hash: String) {}
-    fun onImageRejected(reason: String) {}
-    fun onImageSendFailed(reason: String) {}
     fun isDeviceAwake(): Boolean = true
 }

@@ -1274,62 +1274,6 @@ class SessionTest {
     // ── Image transfer tests ───────────────────────────────────────
 
     @Test
-    fun `sendImage sends correct OFFER JSON format`() {
-        val macInput = PipedInputStream()
-        val toMac = PipedOutputStream(macInput)
-        val macOutput = PipedOutputStream()
-        val fromMac = PipedInputStream(macOutput)
-
-        val readyLatch = CountDownLatch(1)
-        val callback = TestCallback()
-        callback.onReady = { readyLatch.countDown() }
-
-        val session = Session(
-            input = macInput,
-            output = macOutput,
-            isInitiator = true,
-            callback = callback,
-            sharedSecretHex = testSharedSecret,
-            handshakeTimeoutMs = 2000,
-            transferTimeoutMs = 5000
-        )
-
-        Thread {
-            session.performHandshake()
-            session.listenForMessages()
-        }.start()
-
-        val hello = MessageCodec.decode(fromMac)
-        sendValidWelcome(toMac, hello)
-        assertTrue("Session should be ready", readyLatch.await(3, TimeUnit.SECONDS))
-
-        // Queue an image
-        val imageData = ByteArray(100) { it.toByte() }
-        session.sendImage(imageData, "image/png")
-
-        // Read the OFFER
-        val offer = MessageCodec.decode(fromMac)
-        assertEquals(MessageType.OFFER, offer.type)
-
-        val json = JSONObject(String(offer.payload))
-        assertEquals("image/png", json.getString("type"))
-        assertEquals(100, json.getInt("size"))
-        assertTrue("Should have hash", json.has("hash"))
-        assertTrue("Should have senderIp", json.has("senderIp"))
-
-        val expectedHash = Session.sha256Hex(imageData)
-        assertEquals(expectedHash, json.getString("hash"))
-
-        // Send REJECT so session doesn't hang waiting for TCP
-        val rejectJson = JSONObject().apply { put("reason", "test") }
-        MessageCodec.write(toMac, Message(MessageType.REJECT, rejectJson.toString().toByteArray()))
-
-        Thread.sleep(200)
-        session.close()
-        macInput.close(); toMac.close(); macOutput.close(); fromMac.close()
-    }
-
-    @Test
     fun `handleInboundImageOffer rejects when feature disabled`() {
         val macInput = PipedInputStream()
         val toMac = PipedOutputStream(macInput)
@@ -1952,7 +1896,6 @@ class SessionTest {
         var onPairing: (ByteArray, String?) -> Unit = { _, _ -> }
         var onRichMediaChanged: (Boolean) -> Unit = {}
         var onImageReceived: (ByteArray, String, String) -> Unit = { _, _, _ -> }
-        var onImageRejected: (String) -> Unit = {}
         var deviceAwake: Boolean = true
         val knownHashes = CopyOnWriteArrayList<String>()
 
@@ -1968,8 +1911,6 @@ class SessionTest {
             onRichMediaChanged(enabled)
         override fun onImageReceived(data: ByteArray, contentType: String, hash: String) =
             onImageReceived.invoke(data, contentType, hash)
-        override fun onImageRejected(reason: String) =
-            onImageRejected.invoke(reason)
         override fun isDeviceAwake(): Boolean = deviceAwake
     }
 
