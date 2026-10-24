@@ -120,10 +120,12 @@ class ClipboardGhostActivity : ComponentActivity() {
             return false
         }
 
-        val text = clip.getItemAt(0).coerceToText(this)?.toString()
-        if (text.isNullOrBlank()) {
-            Log.d(TAG, "Clipboard text empty")
-            return false
+        // A fresh non-text (e.g. screenshot image) or oversized clip won't turn into
+        // text on retry, so we're done.
+        val text = ClipboardText.extract(this, clip)
+        if (text == null) {
+            Log.d(TAG, "Clipboard has no relayable text")
+            return true
         }
 
         // Forward to service via the same path as the share sheet
