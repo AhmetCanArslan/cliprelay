@@ -10,7 +10,7 @@ There is no priority, round-robin, or multi-device connection support.
 
 ### IP Reachability Required
 
-Image transfer uses TCP between the two devices. They must be IP-reachable: on the same Wi-Fi network, or on the same Tailscale tailnet (each side advertises its Tailscale address alongside its LAN address and the sender prefers the tailnet path, so the devices can be on different networks — e.g. phone on cellular, Mac on Wi-Fi). BLE still carries the signalling, so the devices must remain in Bluetooth range of each other. ClipRelay ships no relay/cloud fallback of its own — if the TCP connection fails, the transfer is dropped silently (auto-sync) or an error is shown (share sheet).
+Image transfer uses TCP between the two devices. They must be IP-reachable: on the same Wi-Fi network, or on the same Tailscale tailnet (each side advertises its Tailscale address alongside its LAN address and the sender prefers the tailnet path, so the devices can be on different networks — e.g. phone on cellular, Mac on Wi-Fi). BLE still carries the signalling, so the devices must remain in Bluetooth range of each other. ClipRelay ships no relay/cloud fallback of its own — if the TCP connection fails, the transfer is dropped silently.
 
 ### Single-Blob Encryption
 
@@ -18,7 +18,7 @@ Images are encrypted as a single AES-256-GCM blob, requiring the entire image to
 
 ### Images Only
 
-Rich media transfer currently supports PNG and JPEG images only. TIFF images on macOS are converted to PNG before sending (Android has no native TIFF support). Other file types (PDF, video, documents) are not supported. The transport layer is content-agnostic and can be extended to other types in the future.
+Rich media transfer is one-way (Mac → Android) and currently supports PNG and JPEG images only. TIFF images on macOS are converted to PNG before sending (Android has no native TIFF support). Other file types (PDF, video, documents) are not supported. The transport layer is content-agnostic and can be extended to other types in the future.
 
 ### No Progress Indication
 

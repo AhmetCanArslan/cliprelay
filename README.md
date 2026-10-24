@@ -21,7 +21,7 @@ Copy on one device, paste on the other. ClipRelay syncs your clipboard between A
 - **Bluetooth only** — direct BLE transfer, no WiFi or internet needed
 - **No cloud, no servers** — your clipboard data never leaves the connection between your devices
 - **Text clipboard** — up to 100 KiB per transfer over BLE
-- **Image sync** *(experimental)* — transfer images (PNG/JPEG, up to 10 MB) between devices over a temporary direct connection, with BLE for signaling. Both devices must be on the same WiFi network, or on the same [Tailscale](https://tailscale.com) tailnet.
+- **Image sync** *(experimental)* — transfer images (PNG/JPEG, up to 10 MB) from Mac to Android over a temporary direct connection, with BLE for signaling. Both devices must be on the same WiFi network, or on the same [Tailscale](https://tailscale.com) tailnet.
 - **Auto-copy on Android** *(experimental)* — automatically detects when you copy text on Android and syncs it to your Mac, no manual sharing needed. Uses Android's accessibility service.
 
 ## Install
@@ -71,7 +71,7 @@ The app auto-updates itself after install (via Sparkle), so `brew upgrade` is no
 
 ### Image sync *(experimental)*
 
-Image transfer uses a temporary TCP connection (not Bluetooth) for speed. Both devices must be on the same WiFi network, or on the same [Tailscale](https://tailscale.com) tailnet — with Tailscale running, the phone can be on cellular while the Mac is on WiFi. Enable "Image Sync" in the paired device settings on both devices. When you copy an image on your Mac or share one from Android, it transfers encrypted over your local network — still AES-256-GCM encrypted, still no cloud.
+Image transfer is one-way (Mac → Android) and uses a temporary TCP connection (not Bluetooth) for speed. Both devices must be on the same WiFi network, or on the same [Tailscale](https://tailscale.com) tailnet — with Tailscale running, the phone can be on cellular while the Mac is on WiFi. Enable "Image Sync" in the paired device settings on both devices. When you copy an image on your Mac, it transfers to Android encrypted over your local network — still AES-256-GCM encrypted, still no cloud.
 
 ### Auto-copy on Android *(experimental)*
 
