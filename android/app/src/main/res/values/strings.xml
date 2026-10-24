@@ -46,7 +46,7 @@
     <string name="otp_relay_setting_title">OTP auto-relay (experimental)</string>
     <string name="otp_relay_setting_subtitle">Send SMS verification codes to your Mac. You confirm each code with one tap.</string>
     <string name="image_sync_setting_title">Image sync (experimental)</string>
-    <string name="image_sync_setting_subtitle">Sync clipboard images. Requires devices to be on the same Wi-Fi.</string>
+    <string name="image_sync_setting_subtitle">Sync clipboard images. Needs both devices on the same Wi-Fi, or on the same Tailscale tailnet.</string>
     <string name="accessibility_disclosure_title">Accessibility Permission</string>
     <string name="accessibility_disclosure_body">ClipRelay uses Android\'s Accessibility Service to detect when you copy text, so it can automatically send your clipboard to your paired Mac.\n\nThis permission allows ClipRelay to monitor tap actions only. It does not read, collect, or store any screen content or personal data.</string>
     <string name="accessibility_disclosure_allow">Allow</string>
