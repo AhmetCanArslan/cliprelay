@@ -68,6 +68,15 @@ enum SessionMode {
 /// Threading: call `listenForMessages()` on a background thread. Use `sendClipboard()`
 /// from any thread — it queues the transfer for the listen loop.
 final class Session {
+    /// Tailscale connections may fall back to a DERP relay, which needs more
+    /// time to come up than a direct LAN connect.
+    fileprivate static let tailscaleConnectTimeoutMs = 8000
+    fileprivate static let lanConnectTimeoutMs = 3000
+
+    fileprivate static func connectTimeoutMs(for host: String) -> Int {
+        LocalNetworkAddress.isTailscaleAddress(host) ? tailscaleConnectTimeoutMs : lanConnectTimeoutMs
+    }
+
     private let logger = Logger(subsystem: "org.cliprelay", category: "Session")
     private let inputStream: InputStream
     private let outputStream: OutputStream
@@ -484,7 +493,11 @@ final class Session {
             throw SessionError.protocolError("No session key available")
         }
         let hash = Session.sha256Hex(imageData)
-        guard let senderIp = LocalNetworkAddress.getLocalIPv4Address() else {
+        // Tailscale address first (any network), LAN address second
+        let senderIps = LocalNetworkAddress.getLocalIPv4Addresses()
+        // The legacy single-address field stays the LAN address, which is what old
+        // receivers validate inbound connections against.
+        guard let senderIp = LocalNetworkAddress.getLocalIPv4Address() ?? senderIps.first else {
             throw SessionError.protocolError("No local IP address available")
         }
 
@@ -494,6 +507,7 @@ final class Session {
             "size": imageData.count,
             "type": contentType,
             "senderIp": senderIp,
+            "senderIps": senderIps,
             "supportsNonce": true
         ]
         let offerData = try JSONSerialization.data(withJSONObject: offerJSON)
@@ -510,6 +524,11 @@ final class Session {
                 throw SessionError.protocolError("Invalid ACCEPT payload for image")
             }
 
+            // Newer receivers advertise every reachable address (LAN + Tailscale);
+            // older ones only send the single tcpHost.
+            let advertisedHosts = (acceptJson["tcpHosts"] as? [String])?.filter { !$0.isEmpty } ?? []
+            let tcpHosts = advertisedHosts.isEmpty ? [tcpHost] : advertisedHosts
+
             // Parse optional tcpNonce (new receivers include this)
             // TODO(2026-05-01): Remove IP validation fallback — all clients should support tcpNonce by now
             var tcpNonce: Data?
@@ -520,23 +539,29 @@ final class Session {
             // Encrypt image
             let encrypted = try E2ECrypto.seal(imageData, key: key)
 
-            // Push via TCP with retry (2 attempts, 500ms pause)
+            // Push via TCP: two rounds over every advertised host (Tailscale first,
+            // then LAN), with a 500ms pause between rounds.
             var lastError: Error?
-            for attempt in 1...2 {
-                do {
-                    try TcpImageSender.send(
-                        host: tcpHost,
-                        port: UInt16(tcpPort),
-                        data: encrypted,
-                        nonce: tcpNonce,
-                        sourceIp: LocalNetworkAddress.getLocalIPv4Address()
-                    )
-                    lastError = nil
-                    break
-                } catch {
-                    lastError = error
-                    if attempt < 2 { Thread.sleep(forTimeInterval: 0.5) }
+            sendLoop: for round in 1...2 {
+                for host in tcpHosts {
+                    do {
+                        try TcpImageSender.send(
+                            host: host,
+                            port: UInt16(tcpPort),
+                            data: encrypted,
+                            nonce: tcpNonce,
+                            // Binding to the LAN address would keep packets out of the
+                            // tunnel, so Tailscale targets stay unbound.
+                            sourceIp: LocalNetworkAddress.sourceIP(for: host),
+                            connectTimeoutMs: Session.connectTimeoutMs(for: host)
+                        )
+                        lastError = nil
+                        break sendLoop
+                    } catch {
+                        lastError = error
+                    }
                 }
+                if round < 2 { Thread.sleep(forTimeInterval: 0.5) }
             }
 
             if let err = lastError {
