@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 
 class ClipboardGhostActivity : ComponentActivity() {
@@ -39,6 +40,11 @@ class ClipboardGhostActivity : ComponentActivity() {
         // appearance to that app, and it still takes focus for the clipboard read.
         window.setLayout(GHOST_WINDOW_SIZE_PX, GHOST_WINDOW_SIZE_PX)
         window.setGravity(Gravity.CENTER)
+
+        // Keep the window focusable (the clipboard read needs focus) but opt it out
+        // of being an input method target. Otherwise the IME sees focus move to a
+        // window without an editor and hides the keyboard the user is typing on.
+        window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
 
         // Safety timeout — always finish even if clipboard read fails
         safetyHandler.postDelayed({
