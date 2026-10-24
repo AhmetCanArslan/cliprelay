@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import androidx.activity.ComponentActivity
 
 class ClipboardGhostActivity : ComponentActivity() {
@@ -21,6 +22,7 @@ class ClipboardGhostActivity : ComponentActivity() {
         // event fires (Android 14 can lag 200-300ms) — retry once before giving up.
         private const val RETRY_DELAY_MS = 500L
         private const val MAX_READ_ATTEMPTS = 2
+        private const val GHOST_WINDOW_SIZE_PX = 1
     }
 
     private val safetyHandler = Handler(Looper.getMainLooper())
@@ -29,6 +31,14 @@ class ClipboardGhostActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Shrink the window to one centered pixel. A full-screen window dictates the
+        // system bar icon colours even when it is transparent, so the theme's light
+        // bars made the status and navigation bar icons flicker dark over whatever
+        // app was underneath. A window that does not overlap the bars leaves their
+        // appearance to that app, and it still takes focus for the clipboard read.
+        window.setLayout(GHOST_WINDOW_SIZE_PX, GHOST_WINDOW_SIZE_PX)
+        window.setGravity(Gravity.CENTER)
 
         // Safety timeout — always finish even if clipboard read fails
         safetyHandler.postDelayed({
