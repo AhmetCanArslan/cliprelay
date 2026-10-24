@@ -7,7 +7,11 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class ServerInfo(val host: String, val port: Int)
+/**
+ * [host] is the primary (LAN) address, kept for older peers.
+ * [hosts] lists every address a sender may try, LAN first then Tailscale.
+ */
+data class ServerInfo(val host: String, val port: Int, val hosts: List<String> = listOf(host))
 
 class TcpImageReceiver(
     private val expectedSize: Int,
@@ -15,7 +19,7 @@ class TcpImageReceiver(
     private val tcpNonce: ByteArray? = null,
     private val noConnectionTimeoutMs: Int = 30_000,
     private val transferTimeoutMs: Int = 120_000,
-    private val maxConnections: Int = 2,
+    private val maxConnections: Int = 4,
 ) {
     private val cancelled = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
@@ -26,8 +30,11 @@ class TcpImageReceiver(
         server.bind(InetSocketAddress("0.0.0.0", 0))
         serverSocket = server
 
-        val localIp = NetworkUtil.getLocalIpAddress() ?: "0.0.0.0"
-        return ServerInfo(localIp, server.localPort)
+        val hosts = NetworkUtil.getLocalIpAddresses()
+        // The legacy single-host field stays the LAN address: old senders bind their
+        // socket to the LAN interface, so a Tailscale address there is unreachable.
+        val localIp = NetworkUtil.getLocalIpAddress() ?: hosts.firstOrNull() ?: "0.0.0.0"
+        return ServerInfo(localIp, server.localPort, hosts.ifEmpty { listOf(localIp) })
     }
 
     /**

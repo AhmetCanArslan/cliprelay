@@ -7,6 +7,7 @@ import org.cliprelay.tcp.NetworkUtil
 import org.cliprelay.tcp.TcpImageReceiver
 import org.cliprelay.tcp.TcpImageSender
 import org.cliprelay.tcp.TcpTransferException
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
 import java.io.OutputStream
@@ -572,6 +573,7 @@ class Session(
             // Send ACCEPT with TCP server info (and nonce when sender supports it)
             val acceptJson = JSONObject().apply {
                 put("tcpHost", serverInfo.host)
+                put("tcpHosts", JSONArray(serverInfo.hosts))
                 put("tcpPort", serverInfo.port)
                 if (tcpNonce != null) {
                     put("tcpNonce", tcpNonce.joinToString("") { "%02x".format(it) })
