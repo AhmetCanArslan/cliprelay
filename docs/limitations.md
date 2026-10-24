@@ -8,9 +8,9 @@ There is no priority, round-robin, or multi-device connection support.
 
 ## Rich Media Transfer
 
-### Same Network Required
+### IP Reachability Required
 
-Image transfer uses TCP over the local network. Both devices must be on the same Wi-Fi network (or otherwise IP-reachable). There is no relay/cloud fallback — if the TCP connection fails, the transfer is dropped silently (auto-sync) or an error is shown (share sheet).
+Image transfer uses TCP between the two devices. They must be IP-reachable: on the same Wi-Fi network, or on the same Tailscale tailnet (each side advertises its Tailscale address alongside its LAN address and the sender prefers the tailnet path, so the devices can be on different networks — e.g. phone on cellular, Mac on Wi-Fi). BLE still carries the signalling, so the devices must remain in Bluetooth range of each other. ClipRelay ships no relay/cloud fallback of its own — if the TCP connection fails, the transfer is dropped silently (auto-sync) or an error is shown (share sheet).
 
 ### Single-Blob Encryption
 
