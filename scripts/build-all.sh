@@ -172,13 +172,18 @@ PLIST
         --timestamp \
         "$app_dir"
   else
-    echo "Developer ID not found, signing ad-hoc with hardened runtime..."
+    echo "Developer ID not found, signing ad-hoc..."
     # --deep so the bundled Sparkle.framework is re-signed ad-hoc too. Without it the
     # framework keeps its original Team ID and hardened runtime refuses to load it
     # ("different Team IDs"), crashing the app on launch.
+    #
+    # No --options runtime here: the hardened runtime turns on library validation,
+    # which an ad-hoc signature can never satisfy (no team identity to match), so the
+    # app still dies on launch with "different Team IDs" even after a --deep re-sign.
+    # Developer ID builds above keep the hardened runtime, which is what notarization
+    # actually requires.
     codesign --force --deep --sign - \
         --entitlements "$entitlements_path" \
-        --options runtime \
         "$app_dir"
   fi
   echo "Code signing complete."
