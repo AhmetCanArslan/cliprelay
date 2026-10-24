@@ -640,6 +640,7 @@ final class Session {
             // Send ACCEPT with TCP server info (and nonce when sender supports it)
             var acceptJSON: [String: Any] = [
                 "tcpHost": serverInfo.host,
+                "tcpHosts": serverInfo.hosts,
                 "tcpPort": Int(serverInfo.port)
             ]
             if let nonce = tcpNonce {

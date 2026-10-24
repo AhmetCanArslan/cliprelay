@@ -1,8 +1,17 @@
 import Foundation
 
 struct TcpServerInfo {
+    /// Primary (LAN) address, kept for older peers.
     let host: String
     let port: UInt16
+    /// Every address a sender may try, LAN first then Tailscale.
+    let hosts: [String]
+
+    init(host: String, port: UInt16, hosts: [String]? = nil) {
+        self.host = host
+        self.port = port
+        self.hosts = hosts ?? [host]
+    }
 }
 
 final class TcpImageReceiver {
@@ -23,7 +32,7 @@ final class TcpImageReceiver {
         tcpNonce: Data? = nil,
         noConnectionTimeoutMs: Int = 30_000,
         transferTimeoutMs: Int = 120_000,
-        maxConnections: Int = 2
+        maxConnections: Int = 4
     ) {
         self.expectedSize = expectedSize
         self.allowedSenderIp = allowedSenderIp
@@ -59,7 +68,7 @@ final class TcpImageReceiver {
             throw TcpTransferError.receiveFailed("bind() failed: \(errno)")
         }
 
-        guard listen(serverFd, 2) == 0 else {
+        guard listen(serverFd, 4) == 0 else {
             close(serverFd)
             throw TcpTransferError.receiveFailed("listen() failed: \(errno)")
         }
@@ -74,8 +83,11 @@ final class TcpImageReceiver {
         }
         let port = UInt16(bigEndian: boundAddr.sin_port)
 
-        let localIp = LocalNetworkAddress.getLocalIPv4Address() ?? "0.0.0.0"
-        return TcpServerInfo(host: localIp, port: port)
+        let hosts = LocalNetworkAddress.getLocalIPv4Addresses()
+        // The legacy single-host field stays the LAN address: old senders bind their
+        // socket to the LAN interface, so a Tailscale address there is unreachable.
+        let localIp = LocalNetworkAddress.getLocalIPv4Address() ?? hosts.first ?? "0.0.0.0"
+        return TcpServerInfo(host: localIp, port: port, hosts: hosts.isEmpty ? [localIp] : hosts)
     }
 
     func receive() throws -> Data {
